@@ -1,0 +1,90 @@
+// Specs: docs/specs/features/F01-autenticacion.md, F02-registrar-bitacora.md, F06-conexiones-sociales.md
+// Solo los campos requeridos por las specs.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  trainingLogs TrainingLog[]
+  // F06: filas de `Follows` donde este usuario es el seguido (sus seguidores)...
+  followers    Follows[]     @relation("following")
+  // ...y donde es el seguidor (a quienes sigue).
+  following    Follows[]     @relation("followers")
+
+  @@map("users")
+}
+
+// F06 - Relación muchos a muchos "Seguidores/Seguidos" entre usuarios (datos sociales -> Postgres).
+// Una fila significa: `follower` sigue a `following`. La clave compuesta impide duplicados.
+model Follows {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("followers", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  // Contar/listar seguidores de un usuario (la PK ya cubre las búsquedas por followerId).
+  @@index([followingId])
+  @@map("follows")
+}
+
+// F02 - Modalidad (Gi, No Gi, Judo, Sambo)
+enum Modality {
+  GI
+  NO_GI
+  JUDO
+  SAMBO
+}
+
+// F02 - Resultado del scramble (A favor / En contra / Fallido)
+enum ScrambleResult {
+  IN_FAVOR
+  AGAINST
+  FAILED
+}
+
+// F02 - Paso 1: metadatos de la sesión (datos relacionales -> Postgres)
+model TrainingLog {
+  id           String     @id @default(uuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trainedAt    DateTime // Fecha y hora de la sesión (automática, editable)
+  modality     Modality
+  location     String? // Opcional
+  satisfaction Int? // 1 a 5, opcional (se valida en la capa de servicio)
+  note         String? // Nota general, opcional
+  createdAt    DateTime   @default(now())
+  scrambles    Scramble[]
+
+  // El Feed (F03) lista las bitácoras de más reciente a más antigua por fecha de publicación.
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("training_logs")
+}
+
+// F02 - Paso 2: acciones rápidas. Posición y técnica son nombres de la ontología (docs/ONTOLOGY.md);
+// la topología del grafo vive en Neo4j, aquí solo se guarda el registro relacional.
+model Scramble {
+  id        String         @id @default(uuid())
+  logId     String
+  log       TrainingLog    @relation(fields: [logId], references: [id], onDelete: Cascade)
+  position  String // Posición inicial (obligatoria)
+  technique String? // Técnica intentada (opcional)
+  result    ScrambleResult // Obligatorio
+  order     Int // Orden en que el usuario registró las acciones
+
+  @@index([logId])
+  @@map("scrambles")
+}
